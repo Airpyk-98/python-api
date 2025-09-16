@@ -28,7 +28,10 @@ COPY requirements.txt .
 RUN pip install --upgrade pip setuptools wheel
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Install manim itself
+RUN pip install manim
+
 COPY . .
 
 # Use Render's dynamic PORT instead of hardcoding
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port $PORT"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "$PORT"]

@@ -1,36 +1,34 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
-import subprocess
-import os
+FROM python:3.11-slim
 
-app = FastAPI()
+# Install system dependencies for manim
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    libcairo2 \
+    libcairo2-dev \
+    libpango-1.0-0 \
+    libpango1.0-dev \
+    libglib2.0-0 \
+    texlive-latex-base \
+    texlive-latex-extra \
+    texlive-fonts-extra \
+    texlive-fonts-recommended \
+    texlive-science \
+    tipa \
+    build-essential \
+    python3-dev \
+    pkg-config \
+    libfreetype6-dev \
+    libffi-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-# Your original Numbers model
-class Numbers(BaseModel):
-    a: int
-    b: int
+WORKDIR /app
 
-# Existing root endpoint
-@app.get("/")
-def read_root():
-    return {"message": "Hello from FastAPI on Render!"}
+COPY requirements.txt .
+RUN pip install --upgrade pip setuptools wheel
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Existing add endpoint
-@app.post("/add")
-def add_numbers(numbers: Numbers):
-    return {"result": numbers.a + numbers.b}
+COPY . .
 
-# ✅ New endpoint for Manim rendering
-@app.get("/render")
-def render_scene():
-    output_dir = "/app/media/videos"
-    os.makedirs(output_dir, exist_ok=True)
-
-    # Run manim on example.py with the SquareToCircle scene
-    cmd = [
-        "manim", "-pql", "example.py", "SquareToCircle",
-        "--media_dir", output_dir
-    ]
-    subprocess.run(cmd, check=True)
-
-    return {"message": "Video rendered!", "path": output_dir}
+# Use Render's dynamic PORT instead of hardcoding
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port $PORT"]
