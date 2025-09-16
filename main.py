@@ -1,16 +1,16 @@
-from flask import Flask, request, jsonify
+from fastapi import FastAPI
+from pydantic import BaseModel
 
-app = Flask(__name__)
+app = FastAPI()
 
-@app.route("/")
-def home():
-    return jsonify({"message": "Hello from Python API on Render!"})
+class Numbers(BaseModel):
+    a: int
+    b: int
 
-@app.route("/add", methods=["POST"])
-def add_numbers():
-    data = request.get_json()
-    result = data["a"] + data["b"]
-    return jsonify({"result": result})
+@app.get("/")
+def read_root():
+    return {"message": "Hello from FastAPI on Render!"}
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+@app.post("/add")
+def add_numbers(numbers: Numbers):
+    return {"result": numbers.a + numbers.b}
