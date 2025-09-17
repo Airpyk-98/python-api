@@ -24,10 +24,8 @@ def render_scene(request: RenderRequest):
         script = request.script
         
         # Define the output directory
-        output_dir = "/app/media/videos"
+        output_dir = "/app/media" # Manim will create a 'videos' subfolder here
         os.makedirs(output_dir, exist_ok=True)
-        os.makedirs(os.path.join(output_dir, "example"), exist_ok=True)
-        os.makedirs(os.path.join(output_dir, "example", "480p15"), exist_ok=True)
 
         # Save the script to a Python file
         script_file_path = "/app/scene.py"
@@ -42,19 +40,22 @@ def render_scene(request: RenderRequest):
         ]
         subprocess.run(cmd, check=True)
 
-        # Correct video path to match Manim's output structure
-video_path = os.path.join(output_dir, "videos", "scene", "480p15", f"{scene}.mp4")
+        # FIXED: This line is now correctly indented to be inside the 'try' block.
+        # Manim creates the 'videos' subdirectory inside the media_dir automatically.
+        video_path = os.path.join(output_dir, "videos", "scene", "480p15", f"{scene}.mp4")
 
         # Log the path and check if the file exists
         print(f"Video path: {video_path}")
-        print(f"Files in directory: {os.listdir(os.path.dirname(video_path))}")
-
+        
         # Check if the video exists
         if os.path.exists(video_path):
             print("Video file found, returning file...")
             return FileResponse(video_path, media_type="video/mp4", filename=f"{scene}.mp4")
         else:
             print(f"Error: Video not found at {video_path}")
+            # Optional: list files for debugging if video not found
+            if os.path.exists(os.path.dirname(video_path)):
+                 print(f"Files in directory: {os.listdir(os.path.dirname(video_path))}")
             raise HTTPException(status_code=404, detail=f"Video not found at {video_path}")
 
     except subprocess.CalledProcessError as e:
