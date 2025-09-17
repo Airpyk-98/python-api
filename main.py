@@ -34,7 +34,8 @@ def render_scene():
     # Path to the generated video (default by manim)
     video_path = os.path.join(output_dir, "example/480p15/SquareToCircle.mp4")
 
+    # Debugging step to confirm if the file is created
     if os.path.exists(video_path):
         return FileResponse(video_path, media_type="video/mp4", filename="SquareToCircle.mp4")
     else:
-        return {"error": "Video not found after rendering."}
+        return {"error": f"Video not found after rendering. Path: {video_path}"}
