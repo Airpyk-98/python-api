@@ -42,8 +42,8 @@ def render_scene(request: RenderRequest):
         ]
         subprocess.run(cmd, check=True)
 
-        # Correct video path based on the Manim output
-        video_path = os.path.join(output_dir, f"videos/example/480p15/{scene}.mp4")
+        # ✅ Correct video path (removed the duplicate "videos")
+        video_path = os.path.join(output_dir, f"example/480p15/{scene}.mp4")
 
         # Log the path and check if the file exists
         print(f"Video path: {video_path}")
