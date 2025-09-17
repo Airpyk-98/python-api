@@ -30,5 +30,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# ✅ Use Render's dynamic PORT
+# Expose the port Render uses for dynamic binding (10000 is the default on Render)
+EXPOSE 10000
+
+# Use Render's dynamic PORT variable to bind the app
 CMD uvicorn main:app --host 0.0.0.0 --port ${PORT}
