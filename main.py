@@ -3,6 +3,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import subprocess
 import os
+import traceback
 
 app = FastAPI()
 
@@ -23,6 +24,7 @@ def add_numbers(numbers: Numbers):
 def render_scene():
     try:
         output_dir = "/app/media/videos"
+        
         # Ensure all necessary directories exist
         os.makedirs(output_dir, exist_ok=True)
         os.makedirs(os.path.join(output_dir, "example"), exist_ok=True)
@@ -36,8 +38,8 @@ def render_scene():
         ]
         subprocess.run(cmd, check=True)
 
-        # Path to the generated video (default by manim)
-        video_path = os.path.join(output_dir, "example/480p15/SquareToCircle.mp4")
+        # Corrected video path based on the Manim log
+        video_path = os.path.join(output_dir, "videos/example/480p15/SquareToCircle.mp4")
         
         # Log the path and check if the file exists
         print(f"Video path: {video_path}")
@@ -52,10 +54,19 @@ def render_scene():
             raise HTTPException(status_code=404, detail=f"Video not found at {video_path}")
 
     except subprocess.CalledProcessError as e:
-        # If there was an error running manim
+        # If there was an error running manim, log the error traceback
         print(f"Error running manim: {e}")
+        traceback.print_exc()  # Print the full traceback of the error
         raise HTTPException(status_code=500, detail="Error occurred while rendering video.")
+    
+    except FileNotFoundError as e:
+        # Handle the case where the file is missing (video or directories)
+        print(f"FileNotFoundError: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=404, detail=f"File not found: {str(e)}")
+    
     except Exception as e:
-        # General error handler
+        # Log unexpected errors with the full traceback
         print(f"An unexpected error occurred: {e}")
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail="An unexpected error occurred.")
