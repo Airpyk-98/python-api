@@ -14,10 +14,12 @@ RUN apt-get update && apt-get install -y \
     texlive-fonts-recommended \
     texlive-science \
     tipa \
+    texlive-pictures \
+    # ADDED: This line installs the package with the mars/venus symbols
+    texlive-latex-extra-doc texlive-fonts-extra-doc wasysym \
     build-essential \
     python3-dev \
     pkg-config \
-    libfreetype6-dev \
     libffi-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
@@ -30,8 +32,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Expose the port Render uses for dynamic binding (10000 is the default on Render)
+# Expose the port Render uses for dynamic binding
 EXPOSE 10000
 
-# Use Render's dynamic PORT variable to bind the app
+# Use Render's dynamic PORT variable to bind the app with an increased timeout
 CMD uvicorn main:app --host 0.0.0.0 --port ${PORT} --timeout-keep-alive 300
+
