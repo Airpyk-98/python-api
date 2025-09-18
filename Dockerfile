@@ -15,11 +15,10 @@ RUN apt-get update && apt-get install -y \
     texlive-science \
     tipa \
     texlive-pictures \
-    # ADDED: This line installs the package with the mars/venus symbols
-    texlive-latex-extra-doc texlive-fonts-extra-doc wasysym \
     build-essential \
     python3-dev \
     pkg-config \
+    libfreetype6-dev \
     libffi-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
