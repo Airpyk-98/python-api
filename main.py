@@ -30,9 +30,9 @@ def render_scene(request: RenderRequest):
 
         print(f"Running manim command for scene: {scene}...")
         cmd = [
-            "manim", "-ql", script_file_path, scene,
-            "--media_dir", output_dir
-        ]
+    "manim", "-qm", script_file_path, scene, # Changed -ql to -qm for 16:9 aspect ratio
+    "--media_dir", output_dir
+]
 
         # Run the command and capture the output
         result = subprocess.run(cmd, capture_output=True, text=True)
