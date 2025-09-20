@@ -22,6 +22,7 @@ def read_root():
 
 @app.post("/render")
 def render_scene(request: RenderRequest):
+    # This function remains unchanged
     try:
         scene = request.scene
         script = request.script
@@ -50,6 +51,7 @@ def render_scene(request: RenderRequest):
 # --- Image Conversion Endpoint (Unchanged) ---
 @app.post("/convert-to-jpg")
 async def convert_image_to_jpg(image: UploadFile = File(...)):
+    # This function remains unchanged
     try:
         image_bytes = await image.read()
         img = Image.open(io.BytesIO(image_bytes))
@@ -66,6 +68,7 @@ async def convert_image_to_jpg(image: UploadFile = File(...)):
 # --- Audio Compression Endpoint (Unchanged) ---
 @app.post("/compress-audio")
 async def compress_audio(background_tasks: BackgroundTasks, audio: UploadFile = File(...)):
+    # This function remains unchanged
     job_id = str(uuid.uuid4())
     temp_dir = "/app/media/temp"
     os.makedirs(temp_dir, exist_ok=True)
@@ -88,7 +91,8 @@ async def compress_audio(background_tasks: BackgroundTasks, audio: UploadFile = 
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"An unexpected server error occurred during audio compression: {str(e)}")
 
-# --- Image + Audio Stitching Section (UPDATED) ---
+
+# --- Image + Audio Stitching Section (CORRECTED) ---
 def cleanup_files(paths: list):
     for path in paths:
         if os.path.exists(path):
@@ -99,7 +103,7 @@ async def stitch_image_and_audio(
     background_tasks: BackgroundTasks,
     image: UploadFile = File(...),
     audio: UploadFile = File(...),
-    quality: str = 'low' # UPDATED: Added quality parameter, defaults to 'low'
+    quality: str = 'low'
 ):
     # Set bitrate based on quality parameter
     if quality == 'high':
@@ -126,8 +130,8 @@ async def stitch_image_and_audio(
         with open(temp_audio_path, "wb") as buffer:
             shutil.copyfileobj(audio.file, buffer)
         
-        # UPDATED: The ffmpeg command now uses the bitrates defined above
-        cmd = ["ffmpeg", "-loop", "1", "-i", temp_image_path, "-i", temp_audio_path, "-c:v", "libx24", "-b:v", video_bitrate, "-tune", "stillimage", "-c:a", "aac", "-b:a", audio_bitrate, "-pix_fmt", "yuv420p", "-shortest", output_video_path]
+        # CORRECTED: Changed "libx24" to the correct "libx264"
+        cmd = ["ffmpeg", "-loop", "1", "-i", temp_image_path, "-i", temp_audio_path, "-c:v", "libx264", "-b:v", video_bitrate, "-tune", "stillimage", "-c:a", "aac", "-b:a", audio_bitrate, "-pix_fmt", "yuv420p", "-shortest", output_video_path]
         
         result = subprocess.run(cmd, capture_output=True, text=True, check=False)
         if result.returncode != 0:
