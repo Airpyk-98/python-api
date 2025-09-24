@@ -100,22 +100,32 @@ def process_stitching_task(task_id: str, temp_image_path: str, audio_paths: List
         cmd = ["ffmpeg", "-loop", "1", "-i", temp_image_path]
         for audio_path in audio_paths:
             cmd.extend(["-i", audio_path])
+        
         num_audios = len(audio_paths)
         audio_inputs = "".join([f"[{i+1}:a]" for i in range(num_audios)])
         filter_complex = f"{audio_inputs}concat=n={num_audios}:v=0:a=1[outa]"
+
         cmd.extend([
             "-filter_complex", filter_complex,
-            "-map", "[0:v]", "-map", "[outa]",
+            # ---- THIS IS THE CORRECTED LINE ----
+            "-map", "0:v",
+            # ------------------------------------
+            "-map", "[outa]",
             "-c:v", "libx264", "-b:v", video_bitrate, "-tune", "stillimage",
             "-c:a", "aac", "-b:a", audio_bitrate, "-pix_fmt", "yuv420p",
             "-shortest", output_video_path
         ])
+        
+        print("Executing FFMPEG command:", " ".join(cmd))
         result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+
         if result.returncode != 0:
             raise Exception(result.stderr)
+
         tasks[task_id]['status'] = 'complete'
         tasks[task_id]['output_path'] = output_video_path
         print(f"Task {task_id} completed successfully.")
+
     except Exception as e:
         print(f"Task {task_id} failed: {e}")
         tasks[task_id]['status'] = 'failed'
@@ -152,6 +162,7 @@ async def submit_stitching_job(
             audio_paths.append(temp_audio_path)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save uploaded files: {str(e)}")
+    
     tasks[task_id] = {'status': 'pending'}
     background_tasks.add_task(
         process_stitching_task, task_id, temp_image_path, audio_paths,
