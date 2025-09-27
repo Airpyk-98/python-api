@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, File, UploadFile, BackgroundTasks
+from fastapi import FastAPI, HTTPException, File, UploadFile, BackgroundTasks, Form
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 import subprocess
@@ -8,7 +8,8 @@ import shutil
 import uuid
 from PIL import Image
 import io
-from typing import List
+from typing import List, Optional
+import requests # <-- ADD THIS IMPORT
 
 # This defines the FastAPI application instance. It must be at the top.
 app = FastAPI()
@@ -22,6 +23,7 @@ class RenderRequest(BaseModel):
 def read_root():
     return {"message": "Hello from FastAPI on Render with Manim and Video Tools!"}
 
+# ... (All other endpoints like /render, /convert-to-jpg, /compress-audio remain unchanged) ...
 @app.post("/render")
 def render_scene(request: RenderRequest):
     try:
@@ -49,7 +51,6 @@ def render_scene(request: RenderRequest):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="An unexpected server error occurred.")
 
-# --- Image Conversion Endpoint ---
 @app.post("/convert-to-jpg")
 async def convert_image_to_jpg(image: UploadFile = File(...)):
     try:
@@ -65,7 +66,6 @@ async def convert_image_to_jpg(image: UploadFile = File(...)):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to convert image: {str(e)}")
 
-# --- Audio Compression Endpoint ---
 @app.post("/compress-audio")
 async def compress_audio(background_tasks: BackgroundTasks, audio: UploadFile = File(...)):
     job_id = str(uuid.uuid4())
@@ -91,7 +91,7 @@ async def compress_audio(background_tasks: BackgroundTasks, audio: UploadFile = 
         raise HTTPException(status_code=500, detail=f"An unexpected server error occurred during audio compression: {str(e)}")
 
 
-# --- Image + Audio Stitching Section (MULTI-AUDIO VERSION) ---
+# --- Image + Audio Stitching Section (NOW ACCEPTS URLS) ---
 tasks = {}
 
 def process_stitching_task(task_id: str, temp_image_path: str, audio_paths: List[str], output_video_path: str, video_bitrate: str, audio_bitrate: str):
@@ -107,9 +107,7 @@ def process_stitching_task(task_id: str, temp_image_path: str, audio_paths: List
 
         cmd.extend([
             "-filter_complex", filter_complex,
-            # ---- THIS IS THE CORRECTED LINE ----
             "-map", "0:v",
-            # ------------------------------------
             "-map", "[outa]",
             "-c:v", "libx264", "-b:v", video_bitrate, "-tune", "stillimage",
             "-c:a", "aac", "-b:a", audio_bitrate, "-pix_fmt", "yuv420p",
@@ -137,9 +135,19 @@ def process_stitching_task(task_id: str, temp_image_path: str, audio_paths: List
 async def submit_stitching_job(
     background_tasks: BackgroundTasks,
     image: UploadFile = File(...),
-    audios: List[UploadFile] = File(...),
+    # --- CHANGE: Accept either uploaded files or a list of URLs ---
+    audios: Optional[List[UploadFile]] = File(None),
+    audio_urls: Optional[List[str]] = Form(None),
+    # -----------------------------------------------------------------
     quality: str = 'low'
 ):
+    # --- CHANGE: Validate inputs ---
+    if not audios and not audio_urls:
+        raise HTTPException(status_code=400, detail="You must provide either audio files or audio URLs.")
+    if audios and audio_urls:
+        raise HTTPException(status_code=400, detail="Please provide either audio files or audio URLs, not both.")
+    # --------------------------------
+
     bitrates = {
         'high': ("2000k", "192k"), 'medium': ("1000k", "128k"), 'low': ("500k", "96k")
     }
@@ -147,19 +155,41 @@ async def submit_stitching_job(
     task_id = str(uuid.uuid4())
     temp_dir = "/app/media/temp"
     os.makedirs(temp_dir, exist_ok=True)
+    
     image_ext = os.path.splitext(image.filename)[1] if image.filename else '.jpg'
     temp_image_path = os.path.join(temp_dir, f"{task_id}{image_ext}")
     output_video_path = os.path.join(temp_dir, f"{task_id}.mp4")
+    audio_paths = []
+    
     try:
+        # Save the single image file
         with open(temp_image_path, "wb") as buffer:
             shutil.copyfileobj(image.file, buffer)
-        audio_paths = []
-        for i, audio_file in enumerate(audios):
-            audio_ext = os.path.splitext(audio_file.filename)[1] if audio_file.filename else '.mp3'
-            temp_audio_path = os.path.join(temp_dir, f"{task_id}_{i}{audio_ext}")
-            with open(temp_audio_path, "wb") as buffer:
-                shutil.copyfileobj(audio_file.file, buffer)
-            audio_paths.append(temp_audio_path)
+        
+        # --- CHANGE: Handle both file uploads and URL downloads ---
+        if audios:
+            # If files are uploaded, save them directly
+            for i, audio_file in enumerate(audios):
+                audio_ext = os.path.splitext(audio_file.filename)[1] if audio_file.filename else '.mp3'
+                temp_audio_path = os.path.join(temp_dir, f"{task_id}_{i}{audio_ext}")
+                with open(temp_audio_path, "wb") as buffer:
+                    shutil.copyfileobj(audio_file.file, buffer)
+                audio_paths.append(temp_audio_path)
+        elif audio_urls:
+            # If URLs are provided, download and save them
+            for i, url in enumerate(audio_urls):
+                try:
+                    response = requests.get(url, stream=True)
+                    response.raise_for_status() # Raise an exception for bad status codes
+                    temp_audio_path = os.path.join(temp_dir, f"{task_id}_{i}.mp3") # Assume mp3 for simplicity
+                    with open(temp_audio_path, "wb") as buffer:
+                        for chunk in response.iter_content(chunk_size=8192):
+                            buffer.write(chunk)
+                    audio_paths.append(temp_audio_path)
+                except requests.RequestException as e:
+                    raise HTTPException(status_code=400, detail=f"Failed to download audio from URL: {url}. Error: {e}")
+        # -------------------------------------------------------------
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save uploaded files: {str(e)}")
     
