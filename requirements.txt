@@ -3,3 +3,4 @@ uvicorn[standard]
 manim==0.17.3
 python-multipart
 requests
+apscheduler
