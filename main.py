@@ -9,10 +9,15 @@ import uuid
 from PIL import Image
 import io
 from typing import List, Optional
-import requests # <-- ADD THIS IMPORT
+import requests
+import time
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # This defines the FastAPI application instance. It must be at the top.
 app = FastAPI()
+
+# Create the scheduler instance that will run our cleanup job
+scheduler = AsyncIOScheduler()
 
 # --- Manim Rendering Section ---
 class RenderRequest(BaseModel):
@@ -23,7 +28,6 @@ class RenderRequest(BaseModel):
 def read_root():
     return {"message": "Hello from FastAPI on Render with Manim and Video Tools!"}
 
-# ... (All other endpoints like /render, /convert-to-jpg, /compress-audio remain unchanged) ...
 @app.post("/render")
 def render_scene(request: RenderRequest):
     try:
@@ -51,6 +55,7 @@ def render_scene(request: RenderRequest):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="An unexpected server error occurred.")
 
+# --- Image Conversion Endpoint ---
 @app.post("/convert-to-jpg")
 async def convert_image_to_jpg(image: UploadFile = File(...)):
     try:
@@ -66,8 +71,9 @@ async def convert_image_to_jpg(image: UploadFile = File(...)):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to convert image: {str(e)}")
 
+# --- Audio Compression Endpoint ---
 @app.post("/compress-audio")
-async def compress_audio(background_tasks: BackgroundTasks, audio: UploadFile = File(...)):
+async def compress_audio(audio: UploadFile = File(...)):
     job_id = str(uuid.uuid4())
     temp_dir = "/app/media/temp"
     os.makedirs(temp_dir, exist_ok=True)
@@ -83,15 +89,14 @@ async def compress_audio(background_tasks: BackgroundTasks, audio: UploadFile = 
             raise HTTPException(status_code=500, detail=f"Failed to compress audio: {result.stderr}")
         if not os.path.exists(temp_output_path):
             raise HTTPException(status_code=500, detail="Compression finished, but output file not found.")
-        background_tasks.add_task(cleanup_files, [temp_input_path, temp_output_path])
+        # NOTE: Immediate cleanup is removed. The scheduled job will handle this file.
         return FileResponse(temp_output_path, media_type="audio/mpeg", filename="compressed_audio.mp3")
     except Exception as e:
-        cleanup_files([temp_input_path, temp_output_path])
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"An unexpected server error occurred during audio compression: {str(e)}")
 
 
-# --- Image + Audio Stitching Section (NOW ACCEPTS URLS) ---
+# --- Image + Audio Stitching Section (with Scheduled Cleanup) ---
 tasks = {}
 
 def process_stitching_task(task_id: str, temp_image_path: str, audio_paths: List[str], output_video_path: str, video_bitrate: str, audio_bitrate: str):
@@ -128,25 +133,20 @@ def process_stitching_task(task_id: str, temp_image_path: str, audio_paths: List
         print(f"Task {task_id} failed: {e}")
         tasks[task_id]['status'] = 'failed'
         tasks[task_id]['error'] = str(e)
-    finally:
-        cleanup_files([temp_image_path] + audio_paths)
+    # NOTE: The 'finally' block that deleted input files is removed. The scheduled job will handle it.
 
 @app.post("/stitch/submit")
 async def submit_stitching_job(
     background_tasks: BackgroundTasks,
     image: UploadFile = File(...),
-    # --- CHANGE: Accept either uploaded files or a list of URLs ---
     audios: Optional[List[UploadFile]] = File(None),
     audio_urls: Optional[List[str]] = Form(None),
-    # -----------------------------------------------------------------
     quality: str = 'low'
 ):
-    # --- CHANGE: Validate inputs ---
     if not audios and not audio_urls:
         raise HTTPException(status_code=400, detail="You must provide either audio files or audio URLs.")
     if audios and audio_urls:
         raise HTTPException(status_code=400, detail="Please provide either audio files or audio URLs, not both.")
-    # --------------------------------
 
     bitrates = {
         'high': ("2000k", "192k"), 'medium': ("1000k", "128k"), 'low': ("500k", "96k")
@@ -162,13 +162,10 @@ async def submit_stitching_job(
     audio_paths = []
     
     try:
-        # Save the single image file
         with open(temp_image_path, "wb") as buffer:
             shutil.copyfileobj(image.file, buffer)
         
-        # --- CHANGE: Handle both file uploads and URL downloads ---
         if audios:
-            # If files are uploaded, save them directly
             for i, audio_file in enumerate(audios):
                 audio_ext = os.path.splitext(audio_file.filename)[1] if audio_file.filename else '.mp3'
                 temp_audio_path = os.path.join(temp_dir, f"{task_id}_{i}{audio_ext}")
@@ -176,19 +173,17 @@ async def submit_stitching_job(
                     shutil.copyfileobj(audio_file.file, buffer)
                 audio_paths.append(temp_audio_path)
         elif audio_urls:
-            # If URLs are provided, download and save them
             for i, url in enumerate(audio_urls):
                 try:
                     response = requests.get(url, stream=True)
-                    response.raise_for_status() # Raise an exception for bad status codes
-                    temp_audio_path = os.path.join(temp_dir, f"{task_id}_{i}.mp3") # Assume mp3 for simplicity
+                    response.raise_for_status()
+                    temp_audio_path = os.path.join(temp_dir, f"{task_id}_{i}.mp3")
                     with open(temp_audio_path, "wb") as buffer:
                         for chunk in response.iter_content(chunk_size=8192):
                             buffer.write(chunk)
                     audio_paths.append(temp_audio_path)
                 except requests.RequestException as e:
                     raise HTTPException(status_code=400, detail=f"Failed to download audio from URL: {url}. Error: {e}")
-        # -------------------------------------------------------------
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save uploaded files: {str(e)}")
@@ -201,26 +196,45 @@ async def submit_stitching_job(
     return {"message": "Stitching job accepted.", "task_id": task_id}
 
 @app.get("/stitch/status/{task_id}")
-def get_stitching_status(task_id: str, background_tasks: BackgroundTasks):
+def get_stitching_status(task_id: str):
     task = tasks.get(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task ID not found.")
     if task['status'] == 'complete':
         output_path = task.get('output_path')
         if output_path and os.path.exists(output_path):
-            background_tasks.add_task(cleanup_files, [output_path])
+            # NOTE: Immediate cleanup on download has been removed.
             return FileResponse(output_path, media_type="video/mp4", filename="stitched_video.mp4")
         else:
-            return {"status": "failed", "error": "Output file not found."}
+            return {"status": "complete", "detail": "Output file has been cleaned up by the scheduled job."}
     elif task['status'] == 'failed':
         return {"status": "failed", "error": task.get('error', 'An unknown error occurred.')}
     return {"status": task['status']}
 
-def cleanup_files(paths: list):
-    for path in paths:
-        if os.path.exists(path):
-            try:
-                os.remove(path)
-                print(f"Cleaned up file: {path}")
-            except OSError as e:
-                print(f"Error cleaning up file {path}: {e}")
+# --- NEW SCHEDULED CLEANUP LOGIC ---
+def cleanup_old_files():
+    """Scans the temp directory and deletes files older than 24 hours."""
+    temp_dir = "/app/media/temp"
+    if not os.path.isdir(temp_dir):
+        return
+    
+    twenty_four_hours_ago = time.time() - (24 * 60 * 60)
+    
+    print("Running scheduled cleanup of old files...")
+    for filename in os.listdir(temp_dir):
+        file_path = os.path.join(temp_dir, filename)
+        try:
+            if os.path.isfile(file_path) or os.path.islink(file_path):
+                file_mod_time = os.path.getmtime(file_path)
+                if file_mod_time < twenty_four_hours_ago:
+                    os.remove(file_path)
+                    print(f"Cleaned up old file: {filename}")
+        except Exception as e:
+            print(f"Error cleaning up file {file_path}: {e}")
+    print("Scheduled cleanup finished.")
+
+@app.on_event("startup")
+async def startup_event():
+    # Schedule the cleanup job to run every hour
+    scheduler.add_job(cleanup_old_files, 'interval', hours=1)
+    scheduler.start()
